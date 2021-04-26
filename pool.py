@@ -70,7 +70,7 @@ class WorkerPool():
             msg += " | " + " ".join("%3d"%(t.own_req[0]) if t.own_req else "---" for t in ts[:c[0]]) + "\n"
 
             # queue
-            msg += "    " * len(ts) + "| " + " ".join("%3d"%(len(t.pqus[PTyp.X])) for t in ts[:c[0]])
+            msg += "    " * len(ts) + "| " + " ".join("%3d"%(len(t.pqus[PTyp.X])+(90 if t.block else 0) )for t in ts[:c[0]])
             msg += "\n"
 
             # pairs

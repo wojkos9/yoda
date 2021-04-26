@@ -24,6 +24,7 @@ class WorkerX(GenericWorker):
                     self.handle_req(m)
                 elif m.styp == PTyp.Z:
                     if self.state not in (ST.CRIT,):
+                        # self.block = True
                         self.send(m.sender, MTyp.ACK)
                     else:
                         self.putqu(m)
@@ -46,8 +47,9 @@ class WorkerX(GenericWorker):
 
             elif m.typ == MTyp.DEC:
                 self.energy -= 1
-                if self.energy == 0:
-                    self.send_to_typ(PTyp.Z, MTyp.WAK)
+                if self.energy == 0 and not self.block:
+                    # self.is_messenger = True
+                    # self.send_to_typ(PTyp.Z, MTyp.WAK)
                     self.block = True
     
     def work(self):
@@ -65,8 +67,8 @@ class WorkerX(GenericWorker):
 
             self.sem.acquire()
             self.state = ST.CRIT
-            self.send_to_typ(self.typ, MTyp.DEC)
-            self.release_typ(PTyp.X)
+            
+            
             self.send(self.pair, MTyp.STA)
             self.last_crit += 1
 
@@ -76,7 +78,7 @@ class WorkerX(GenericWorker):
             self.sem.acquire()
             self.state = ST.IDLE
             self.dec()
-            
+            self.release_typ(PTyp.X)
             self.release_typ(PTyp.Z)
             
 
@@ -132,7 +134,7 @@ class WorkerY(GenericWorker):
             self.send(self.pair, MTyp.END)
             self.sem.acquire()
             self.state = ST.IDLE
-            time.sleep(1)
+            # time.sleep(1)
 
 class WorkerZ(GenericWorker):
     def __init__(self, *args, **kwargs):
@@ -140,11 +142,14 @@ class WorkerZ(GenericWorker):
 
     def process_msg(self, m: TMsg):
         if m.typ == MTyp.WAK:
+            self.log("WAKE")
             if self.state == ST.IDLE:
                 self.state = ST.DOOR
+                self.log("WAKE2")
                 self.sem.release()
         elif m.typ == MTyp.ACK:
             self.ack_count += 1
+            self.log("ACK")
             if self.ack_count == self.cx:
                 self.state = ST.CRIT
                 self.sem.release()
@@ -159,7 +164,7 @@ class WorkerZ(GenericWorker):
 
             self.sem.acquire()
             self.state = ST.CRIT
-            time.sleep(3*random.random())
+            time.sleep(0.3*random.random())
 
             self.state = ST.IDLE
             self.pool.energy += 1
@@ -168,8 +173,8 @@ class WorkerZ(GenericWorker):
             
             
 if __name__=="__main__":
-    dbg = Debug(20)
-    pool = WorkerPool((2, 2, 2), dbg,
+    dbg = Debug(10)
+    pool = WorkerPool((5, 4, 6), dbg,
                         classmap={PTyp.X: WorkerX, PTyp.Y: WorkerY, PTyp.Z: WorkerZ})
 
     pool.start()
