@@ -24,7 +24,7 @@ class WorkerPool():
         
         self.loc = Lock()
 
-        Thread(target=self.rep_th, daemon=True).start()
+        # Thread(target=self.rep_th, daemon=True).start()
     
     def send(self, tid, m):
         self.queues[tid].append(m)
@@ -68,6 +68,10 @@ class WorkerPool():
             
             # req
             msg += " | " + " ".join("%3d"%(t.own_req[0]) if t.own_req else "---" for t in ts[:c[0]]) + "\n"
+
+            # queue
+            msg += "    " * len(ts) + "| " + " ".join("%3d"%(len(t.pqus[PTyp.X])) for t in ts[:c[0]])
+            msg += "\n"
 
             # pairs
             msg += " ".join(f"{min(t.pid, t.pair)}-{max(t.pid, t.pair)}" if t.pair != -1 else "---" for t in ts)

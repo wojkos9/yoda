@@ -17,6 +17,9 @@ class MTyp(Enum):
     STA = 4
     END = 5
     FIN = 6
+    INC = 7
+    WAK = 8
+    DEC = 9
     TER = 99
 
 class ST(Enum):
@@ -25,6 +28,7 @@ class ST(Enum):
     PAIR = 2
     DOOR = 3
     CRIT = 4
+    BLOC = 5
     def __lt__(self, s2):
         return self.value < s2.value
 

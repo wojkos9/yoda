@@ -37,7 +37,9 @@ class GenericWorker(Thread):
         self.pair = -1
         self.last_crit = 0
         self.energy = ene if ene else self.cz
+        self.energy_max = self.energy
         self.is_messenger = False
+        self.block = False
 
 
     def mpqu(self, m):
@@ -51,9 +53,8 @@ class GenericWorker(Thread):
         qu.sort()
 
     def lpopqu(self, typ):
-        qu = self.pqus[typ]
-        if qu:
-            r, qu = qu[0], qu[1:]
+        if self.pqus[typ]:
+            r, self.pqus[typ] = self.pqus[typ][0], self.pqus[typ][1:]
             return r
         return None
     
@@ -84,6 +85,7 @@ class GenericWorker(Thread):
             # cl = self.clock+1
             for tid in self.pool.get_of_type(t):
                 if tid != self.pid:
+                    # time.sleep(random.random()*0.3)
                     self.send(tid, mtyp, **kwargs)
 
     def pdesc(self, pid):
@@ -91,6 +93,7 @@ class GenericWorker(Thread):
 
     def _recv(self):
         self.msem.acquire()
+        # time.sleep(random.random()*0.3)
         # time.sleep(0.2+random.random()*0.3)
         m = self.queue.popleft()
         self.clock = max(self.clock, m.cl) + 1
@@ -112,6 +115,7 @@ class GenericWorker(Thread):
         if self.is_messenger:
             self.log("/////MESSENGER/////", lvl=1)
             self.is_messenger = False
+            self.send_to_typ(PTyp.Z, MTyp.WAK)
 
     def standard_pairing(self, m: TMsg):
         if m.typ == MTyp.PAR:
@@ -143,19 +147,19 @@ class GenericWorker(Thread):
         return True
 
     def send_req_if_ok(self, to_typ):
-        if self.energy > 0:
-            self.clock = (cl := self.clock+1)
-            self.own_req = (cl, self.pid)
-            self.ack_count = 0
-            
-            self.send_to_typ(to_typ, MTyp.REQ, cl=cl)
-            self.state = ST.DOOR
-            self.try_enter()
-            return True
-        return False
+        # if self.energy > 0:
+        self.clock = (cl := self.clock+1)
+        self.own_req = (cl, self.pid)
+        self.ack_count = 0
+        
+        self.send_to_typ(to_typ, MTyp.REQ, cl=cl)
+        self.state = ST.DOOR
+        self.try_enter()
+        return True
+        # return False
 
     def try_enter(self):
-        if self.state == ST.DOOR and self.ack_count >= self.cown - self.energy:
+        if self.state == ST.DOOR and self.ack_count >= self.cown - self.energy and not self.block:
             self.state = ST.CRIT
             self.energy -= 1
             if self.energy == 0:
@@ -169,27 +173,28 @@ class GenericWorker(Thread):
     def handle_req(self, m: TMsg):
         req = (m.cl, m.sender)
         should_qu = False
-        if self.energy > 0:
-            if self.state == ST.DOOR and self.own_req < req:
-                should_qu = True
-        else:
+        if self.state == ST.DOOR and self.own_req < req:
             should_qu = True
 
         if should_qu:
             self.putqu(m)
         else:
             self.send(m.sender, MTyp.ACK)
-            self.energy -= 1
 
-    def release_if_ok(self):
-        while self.energy > 0:
-            nxt = self.lpopqu(self.typ)
-            if nxt is not None:
-                tid = nxt[1]
-                self.energy -= 1
-                self.send(tid, MTyp.ACK)
-            else:
-                break
+    # def release_if_ok(self):
+    #     while self.energy > 0:
+    #         nxt = self.lpopqu(self.typ)
+    #         if nxt is not None:
+    #             tid = nxt[1]
+    #             self.energy -= 1
+    #             self.send(tid, MTyp.ACK)
+    #         else:
+    #             break
+            
+    def release_typ(self, typ):
+        while (nxt := self.lpopqu(typ)):
+            tid = nxt[1]
+            self.send(tid, MTyp.ACK)
 
     def try_pair(self):
         if self.pqus[self.opp]:
