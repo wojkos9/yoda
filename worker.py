@@ -8,6 +8,7 @@ import time
 from collections.abc import Iterable
 
 class GenericWorker(Thread):
+    HAS_DELAY = False
     def __init__(self, typ, pid, pool, debug=None, ene=None):
         Thread.__init__(self, daemon=True)
         self.typ = typ
@@ -40,6 +41,7 @@ class GenericWorker(Thread):
         self.energy_max = self.energy
         self.is_messenger = False
         self.block = False
+        self.has_delay = GenericWorker.HAS_DELAY
 
 
     def mpqu(self, m):
@@ -85,7 +87,7 @@ class GenericWorker(Thread):
             # cl = self.clock+1
             for tid in self.pool.get_of_type(t):
                 if tid != self.pid:
-                    time.sleep(random.random()*0.3)
+                    if self.has_delay: time.sleep(random.random()*0.3)
                     self.send(tid, mtyp, **kwargs)
 
     def pdesc(self, pid):
@@ -96,7 +98,7 @@ class GenericWorker(Thread):
 
     def _recv(self):
         self.msem.acquire()
-        time.sleep(random.random()*0.3)
+        if self.has_delay: time.sleep(random.random()*0.3)
         # time.sleep(0.2+random.random()*0.3)
         m = self.queue.popleft()
         self.clock = max(self.clock, m.cl) + 1
@@ -112,13 +114,17 @@ class GenericWorker(Thread):
     def process_msg(self, m: TMsg):
         pass
 
+    def message(self):
+        self.log("/////MESSENGER/////", lvl=1)
+        self.send_to_typ(PTyp.Z, MTyp.WAK)
+
     def dec(self):
         self.log("DEC", lvl=19)
         self.pool.dec()
         if self.is_messenger:
-            self.log("/////MESSENGER/////", lvl=1)
+            self.message()
             self.is_messenger = False
-            self.send_to_typ(PTyp.Z, MTyp.WAK)
+            
 
     def standard_pairing(self, m: TMsg):
         if m.typ == MTyp.PAR:
@@ -167,8 +173,8 @@ class GenericWorker(Thread):
             self.energy -= 1
             self.log("DEC-------", lvl=5)
             self.send_to_typ(self.typ, MTyp.DEC)
-            if self.energy == 0:
-                self.is_messenger = True
+            # if self.energy == 0:
+                # self.is_messenger = True
             self.sem.release()
             self.log("ENTER", lvl=9)
             return True
@@ -178,7 +184,7 @@ class GenericWorker(Thread):
     def handle_req(self, m: TMsg):
         req = (m.cl, m.sender)
         should_qu = False
-        if self.state == ST.DOOR and self.own_req < req or self.state == ST.CRIT:
+        if self.state == ST.DOOR and self.own_req < req:
             should_qu = True
 
         if should_qu:
