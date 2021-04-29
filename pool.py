@@ -1,5 +1,5 @@
 from utils import *
-from threading import Thread, Lock, Semaphore
+from threading import Lock, Semaphore
 from collections import deque
 from itertools import chain
 import time
@@ -22,6 +22,8 @@ class WorkerPool():
         self.threads = [classmap[self.typemap[i]](i, **params) for i in range(self.size)]
         self.pid = 999
         
+        self.last_msg = ""
+
         self.loc = Lock()
 
         # Thread(target=self.rep_th, daemon=True).start()
@@ -83,9 +85,11 @@ class WorkerPool():
 
             # states + X energies
             msg += "\n" + " ".join("%3s"%(t.state.name[0]) for t in ts)
-            msg += " | "+" ".join(["%3d"%(t.energy) for t in ts[:c[0]]]) + f" = {self.energy}"
+            msg += " | "+" ".join(["%3d"%(t.energy, ) for t in ts[:c[0]]]) + f" = {self.energy}"
             msg += " ENE "+" OK" if check_state else "ERR"
-            print(msg)
+            if msg != self.last_msg:
+                print(msg)
+                self.last_msg = msg
             if self.energy > self.energy_max:
                 raise Exception("ENERGY ABOVE MAX")
             elif self.energy < 0:
@@ -100,7 +104,7 @@ class WorkerPool():
     def rep_th(self):
         while 1:
             self.do_report()
-            time.sleep(1)
+            time.sleep(0.1)
 
     def desc(self, pid):
         return self.threads[pid].desc if pid != self.pid else "POOL"

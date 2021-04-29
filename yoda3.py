@@ -1,4 +1,3 @@
-from threading import Thread, Lock, Semaphore
 import random
 import time
 
@@ -6,12 +5,16 @@ from utils import *
 from worker import GenericWorker
 from pool import WorkerPool
 
+from threading import Semaphore
+
 
 class WorkerX(GenericWorker):
     def __init__(self, *args, **kwargs):
         GenericWorker.__init__(self, PTyp.X, *args, **kwargs)
         self.opp = PTyp.Y
         self.max_cl_letin = None
+        self.sem2 = Semaphore(1)
+        self.inc_count = 0
 
     def process_msg(self, m: TMsg):
         r = self.standard_pairing(m)
@@ -30,17 +33,22 @@ class WorkerX(GenericWorker):
                         self.putqu(m)
 
             elif m.typ == MTyp.ACK:
-                self.ack_count += 1
-                if self.ack_count==self.cx-1 and self.energy == 0:
-                    # self.is_messenger = True
-                    self.message()
-                    self.log("MESSACK", lvl=5)
-                self.try_enter()
+                if m.cl > self.own_req[0]:
+                    self.ack_count += 1
+                    if self.ack_count==self.cx-1:
+                        # if self.energy == 0:
+                        #     self.message()
+                        #     self.log("MESSACK", lvl=5)
+                        self.sem2.release()
+                    self.try_enter()
                 
 
             elif m.typ == MTyp.INC:
                 self.energy += 1
-                if self.energy == self.energy_max:
+
+                self.inc_count += 1
+                if self.inc_count == self.energy_max:
+                    self.inc_count = 0
                     # if self.state == ST.BLOC:
                     #     self.state = ST.IDLE
                     #     self.release_typ(PTyp.X)
@@ -52,42 +60,60 @@ class WorkerX(GenericWorker):
 
             elif m.typ == MTyp.DEC:
                 self.energy -= 1
+                self.send(m.sender, MTyp.DAK)
                 if self.energy == 0:
                     # if self.ack_count == self.cx-1:
                     #     self.is_messenger = True
                     #     self.log("MESSENE", lvl=5)
                     # self.send_to_typ(PTyp.Z, MTyp.WAK)
                     self.block = True
+            elif m.typ == MTyp.DAK:
+                self.dack_count += 1
+                if self.dack_count == self.cx - 1:
+                    if self.energy == 0:
+                        self.message()
+                    self.sem2.release()
     
     def work(self):
+        self.pair = self.cown + self.pid
         while 1:
             self.pair = -1
-            self.ack_count = 0
+            
+
+            # last = self.state
+            # self.state=ST.X
+            # self.sem2.acquire()
+            # self.state=last
+            # self.ack_count = 0
+
             self.state = ST.WAIT
-            # self.send_to_typ(PTyp.Y, MTyp.PAR)
+            
             self.try_pair()
             self.sem.acquire()
             self.state = ST.PAIR
-            self.log("---PAIR", self.pdesc(self.pair), lvl=10)
 
-            r = self.send_req_if_ok(self.typ)
+            self.send_req_if_ok(self.typ)
 
             self.sem.acquire()
             self.state = ST.CRIT
-            self.release_typ(PTyp.X)
+            
             
             self.send(self.pair, MTyp.STA)
             self.last_crit += 1
 
-            time.sleep(1+random.random())
+            # time.sleep(1+random.random())
+
             
             self.send(self.pair, MTyp.END)
+            
             self.sem.acquire()
+            # self.pair = -1
             self.state = ST.IDLE
             self.dec()
             
             self.release_typ(PTyp.Z)
             
+            self.sem2.acquire()
 
             # if self.energy == 0:
             #     self.state = ST.BLOC
@@ -100,14 +126,17 @@ class WorkerY(GenericWorker):
     def __init__(self, *args, **kwargs):
         GenericWorker.__init__(self, PTyp.Y, *args, **kwargs)
         self.opp = PTyp.X
+        self.par_cl = -1
 
     def process_msg(self, m: TMsg):
         if m.typ == MTyp.ACC:
-            if self.state == ST.WAIT:
+            if self.state == ST.WAIT and m.cl > self.par_cl:
                 self.send(m.sender, MTyp.ACC)
                 self.pair = m.sender
                 self.state = ST.PAIR
                 self.sem.release()
+            elif m.sender == self.pair and m.cl > self.par_cl:
+                self.send(m.sender, MTyp.ACC)
         elif m.typ == MTyp.END:
             if self.state > ST.WAIT:
                 self.sem.release()
@@ -120,26 +149,30 @@ class WorkerY(GenericWorker):
 
     def work(self):
         # GenericWorker.work(self)
+        self.pair = self.pid - self.cx
         while 1:
             self.pair = -1
+            
+            cl = self.clock
+            self.par_cl = cl
             self.state = ST.WAIT
-            self.send_to_typ(PTyp.X, MTyp.PAR)
+            self.send_to_typ(PTyp.X, MTyp.PAR, cl=cl)
 
             self.sem.acquire()
             self.state = ST.PAIR
-            self.log("---PAIR", self.pdesc(self.pair), lvl=10)
             
             self.send_to_typ(self.opp, MTyp.FIN)
             self.state = ST.DOOR
-            
+
             self.sem.acquire()
             self.state = ST.CRIT
             self.last_crit += 1
 
-            time.sleep(1+random.random())
+            # time.sleep(random.random())
             
             self.send(self.pair, MTyp.END)
             self.sem.acquire()
+            # self.pair = -1
             self.state = ST.IDLE
             # time.sleep(1)
 
@@ -156,7 +189,6 @@ class WorkerZ(GenericWorker):
                 self.sem.release()
         elif m.typ == MTyp.ACK:
             self.ack_count += 1
-            self.log("ACK")
             if self.ack_count == self.cx:
                 self.state = ST.CRIT
                 self.sem.release()
@@ -171,18 +203,20 @@ class WorkerZ(GenericWorker):
 
             self.sem.acquire()
             self.state = ST.CRIT
-            time.sleep(0.3*random.random())
-
-            self.state = ST.IDLE
+            self.last_crit += 1
+            # time.sleep(0.3*random.random())
+            
             self.pool.energy += 1
+            self.state = ST.IDLE
+            
             self.log("INC+++++++", lvl=5)
             self.send_to_typ([PTyp.X], MTyp.INC)
             
             
 if __name__=="__main__":
-    dbg = Debug(10)
+    dbg = Debug(0)
     GenericWorker.HAS_DELAY = False
-    pool = WorkerPool((5, 4, 1), dbg,
+    pool = WorkerPool((4, 4, 5), dbg,
                         classmap={PTyp.X: WorkerX, PTyp.Y: WorkerY, PTyp.Z: WorkerZ})
 
     pool.start()

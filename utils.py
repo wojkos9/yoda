@@ -20,15 +20,18 @@ class MTyp(Enum):
     INC = 7
     WAK = 8
     DEC = 9
+    DAK = 10
     TER = 99
 
 class ST(Enum):
     IDLE = 0
     WAIT = 1
     PAIR = 2
-    DOOR = 3
-    CRIT = 4
-    BLOC = 5
+    X    = 3
+    DOOR = 4
+    CRIT = 5
+    BLOC = 6
+    
     def __lt__(self, s2):
         return self.value < s2.value
 

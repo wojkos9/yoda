@@ -1,8 +1,7 @@
 from utils import *
-from threading import Thread, Lock, Semaphore
+from threading import Semaphore, Thread
 from collections import deque
 from itertools import chain
-import heapq
 import random
 import time
 from collections.abc import Iterable
@@ -32,16 +31,17 @@ class GenericWorker(Thread):
         self.copp, self.cown =  (self.cy, self.cx) if self.typ==PTyp.X else  (self.cx, self.cy)
         self.own_req = None
         self.ack_count = 0
-        self.need_count = self.cown - 3
         self.order = 0
         self.oppr = 0
         self.pair = -1
         self.last_crit = 0
         self.energy = ene if ene else self.cz
         self.energy_max = self.energy
-        self.is_messenger = False
         self.block = False
         self.has_delay = GenericWorker.HAS_DELAY
+        self.max_delay = 0.1
+
+        self.init2()
 
 
     def mpqu(self, m):
@@ -64,49 +64,60 @@ class GenericWorker(Thread):
         # print(self.pqus[self.opp], "-", m.sender)
         self.pqus[m.styp] = list(filter(lambda e: e[1] != m.sender, self.pqus[m.styp]))
         # print(self.pqus[self.opp])
-        pass
 
     def log(self, *args, **kwargs):
         if self.debug:
-            self.debug.log("[%4s %s]" % (self.desc, self.state_desc()), *args, f"@ {self.clock}", **kwargs)
+            self.debug.log("[%4s %s]" % (self.desc, self.state_desc()), *args, f"@ {self.clock}", **kwargs)#, "\t\t\t", time.time(), **kwargs)
 
     def send(self, tid, mtyp, data={}, cl=None):
         self.clock += 1
         if cl is None:
             cl = self.clock
         m = TMsg(mtyp, self.pid, self.typ, data, cl)
-        self.pool.send(tid, m)
         self.log(   ">%4s" % (self.pool.threads[tid].desc), 
                     m.typ.name,
                     f"[cl={m.cl}]",
                     m.data, 
                     lvl=30)
 
+        
+        self.pool.send(tid, m)
+        
+
     def send_to_typ(self, typ, mtyp, **kwargs):
         for t in typ if isinstance(typ, Iterable) else [typ]:
             # cl = self.clock+1
             for tid in self.pool.get_of_type(t):
                 if tid != self.pid:
-                    if self.has_delay: time.sleep(random.random()*0.3)
+                    if self.has_delay: time.sleep(random.random()*self.max_delay)
                     self.send(tid, mtyp, **kwargs)
+                    
 
     def pdesc(self, pid):
         return self.pool.desc(pid)
 
     def state_desc(self):
-        return self.state.name[0]+"+"+str(self.energy)+"_"+str(self.ack_count)+">"+str(self.cown - self.energy)
+        # return self.state.name[0]+"+"+str(self.energy)+"_"+str(self.ack_count)+">"+str(self.cown - self.energy)
+        return f"{self.state.name[0]}E{self.energy}a{self.ack_count}"
 
     def _recv(self):
         self.msem.acquire()
-        if self.has_delay: time.sleep(random.random()*0.3)
+        
         # time.sleep(0.2+random.random()*0.3)
         m = self.queue.popleft()
-        self.clock = max(self.clock, m.cl) + 1
+
         self.log(   "<%4s" % (self.pdesc(m.sender)), 
                     m.typ.name,
                     f"[cl={m.cl}]",
                     m.data, 
                     lvl=20)
+
+        if m.typ == MTyp.ACK:
+            if self.has_delay: time.sleep(random.random()*self.max_delay)
+        else:
+            if self.has_delay: time.sleep(random.random()*self.max_delay)
+        self.clock = max(self.clock, m.cl) + 1
+        
         if m.typ == MTyp.TER:
             exit(0)
         return m
@@ -121,14 +132,17 @@ class GenericWorker(Thread):
     def dec(self):
         self.log("DEC", lvl=19)
         self.pool.dec()
-        if self.is_messenger:
-            self.message()
-            self.is_messenger = False
+        # if self.is_messenger:
+        #     self.message()
+        #     self.is_messenger = False
             
+    def init2(self):
+        self.dak_count = 0
+
 
     def standard_pairing(self, m: TMsg):
         if m.typ == MTyp.PAR:
-            if self.pair == -1:
+            if self.pair == -1:# or m.sender == self.pair:
                 self.pair = m.sender
                 self.send(m.sender, MTyp.ACC)
             else:
@@ -157,26 +171,32 @@ class GenericWorker(Thread):
 
     def send_req_if_ok(self, to_typ):
         # if self.energy > 0:
-        self.clock = (cl := self.clock+1)
+        # self.clock = (cl := self.clock+1)
+
+        self.state = ST.DOOR
+        cl = self.clock
         self.own_req = (cl, self.pid)
         self.ack_count = 0
         
         self.send_to_typ(to_typ, MTyp.REQ, cl=cl)
-        self.state = ST.DOOR
+        
         self.try_enter()
         return True
         # return False
 
     def try_enter(self):
+        
         if self.state == ST.DOOR and self.ack_count >= self.cown - self.energy and not self.block:
             self.state = ST.CRIT
             self.energy -= 1
-            self.log("DEC-------", lvl=5)
-            self.send_to_typ(self.typ, MTyp.DEC)
-            # if self.energy == 0:
-                # self.is_messenger = True
-            self.sem.release()
             self.log("ENTER", lvl=9)
+            self.log("DEC-------", lvl=5)
+            self.dack_count = 0
+            self.send_to_typ(self.typ, MTyp.DEC)
+            self.release_typ(PTyp.X)
+
+            self.sem.release()
+            
             return True
         self.log("CANT ENTER+++++", self.state.name, self.block, lvl=11)
         return False
@@ -203,7 +223,10 @@ class GenericWorker(Thread):
     #             break
             
     def release_typ(self, typ):
-        while (nxt := self.lpopqu(typ)):
+        while True:
+            nxt = self.lpopqu(typ)
+            if not nxt:
+                break
             tid = nxt[1]
             self.send(tid, MTyp.ACK)
 
